@@ -17,6 +17,14 @@ CODE_BLOCK_PATTERN = re.compile(
 HEADING_PATTERN = re.compile(r"^h([1-6])\.\s+(.*)$")
 INLINE_CODE_PATTERN = re.compile(r"@(.*?)@")
 LIST_MARKERS = {"#": "[list=1]", "*": "[list]"}
+HEADING_SIZES = {
+    "1": "18pt",
+    "2": "16pt",
+    "3": "14pt",
+    "4": "12pt",
+    "5": "10pt",
+    "6": "8pt",
+}
 
 
 def _replace_code_blocks(text: str) -> str:
@@ -30,7 +38,9 @@ def _replace_code_blocks(text: str) -> str:
         language, body = match.groups()
         language_suffix = f"={language.lower()}" if language else ""
         cleaned_body = body.strip("\n")
-        return f"[code{language_suffix}]\n{cleaned_body}\n[/code]"
+        escaped_header = _escape_bbcode(f"[code{language_suffix}]")
+        escaped_footer = _escape_bbcode("[/code]")
+        return "\n".join(["[CODE]", escaped_header, cleaned_body, escaped_footer, "[/CODE]"])
 
     return CODE_BLOCK_PATTERN.sub(_to_bbcode, text)
 
@@ -39,6 +49,12 @@ def _convert_inline_code(text: str) -> str:
     """Преобразует инлайн-конструкции ``@код@`` в BBCode ``[code]``."""
 
     return INLINE_CODE_PATTERN.sub(lambda m: f"[code]{m.group(1)}[/code]", text)
+
+
+def _escape_bbcode(text: str) -> str:
+    """Экранирует квадратные скобки, чтобы BBCode не парсился внутри ``[CODE]``."""
+
+    return text.replace("[", "&#91;").replace("]", "&#93;")
 
 
 def _start_list(marker: str) -> str:
@@ -59,7 +75,9 @@ def _convert_line(line: str) -> str:
     heading_match = HEADING_PATTERN.match(line)
     if heading_match:
         level, title = heading_match.groups()
-        return f"[h{level}]{title.strip()}[/h{level}]"
+        size = HEADING_SIZES.get(level, "12pt")
+        text = title.strip()
+        return f"[SIZE={size}][B]{text}[/B][/SIZE]"
 
     return _convert_inline_code(line)
 
@@ -76,9 +94,11 @@ def convert(text: str) -> str:
     """Конвертирует Textile-строку в BBCode.
 
     Поддерживаемые элементы:
-    * Заголовки ``h1.`` – ``h6.`` → ``[hX]``.
+    * Заголовки ``h1.`` – ``h6.`` → ``[SIZE=NNpt][B]...[/B][/SIZE]``
+      (18pt для ``h1`` и далее по убыванию).
     * Инлайн-код ``@...@`` → ``[code]``.
-    * Блоки ``<pre><code class="lang">`` → ``[code=lang]``.
+    * Блоки ``<pre><code class="lang">`` → ``[CODE]`` с экранированным
+      содержимым ``[code]`` и ``[/code]``.
     * Маркированные и нумерованные списки на основе ``*`` и ``#``.
     Остальной текст остаётся без изменений.
     """
