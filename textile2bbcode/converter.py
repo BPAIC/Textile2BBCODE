@@ -7,7 +7,6 @@ Textile-разметки в BBCode. Логика преобразования д
 from __future__ import annotations
 
 import re
-from typing import Iterable
 
 
 CODE_BLOCK_PATTERN = re.compile(
@@ -82,12 +81,33 @@ def _convert_line(line: str) -> str:
     return _convert_inline_code(line)
 
 
-def _finalize_result(lines: Iterable[str], active_list: str | None) -> list[str]:
-    """Добавляет закрытие списка, если необходимо."""
+def _close_list_stack(lines: list[str], stack: list[str]) -> None:
+    """Закрывает все уровни вложенных списков."""
 
-    if active_list:
-        lines.append(_close_list(active_list))
-    return list(lines)
+    while stack:
+        closing = _close_list(stack.pop())
+        if closing:
+            lines.append(closing)
+
+
+def _sync_list_levels(lines: list[str], stack: list[str], markers: str) -> None:
+    """Синхронизирует активные уровни списков с текущими маркерами."""
+
+    new_levels = list(markers)
+
+    while len(stack) > len(new_levels):
+        closing = _close_list(stack.pop())
+        if closing:
+            lines.append(closing)
+
+    for idx, marker in enumerate(new_levels):
+        if idx >= len(stack) or stack[idx] != marker:
+            while len(stack) > idx:
+                closing = _close_list(stack.pop())
+                if closing:
+                    lines.append(closing)
+            lines.append(_start_list(marker))
+            stack.append(marker)
 
 
 def convert(text: str) -> str:
@@ -105,32 +125,30 @@ def convert(text: str) -> str:
 
     text = _replace_code_blocks(text)
     converted_lines: list[str] = []
-    active_list: str | None = None
+    list_stack: list[str] = []
 
     for raw_line in text.splitlines():
-        list_match = re.match(r"^([#*])\s+(.*)$", raw_line)
+        list_match = re.match(r"^([#*]+)\s+(.*)$", raw_line)
         if list_match:
-            marker, content = list_match.groups()
-            if active_list != marker:
-                if active_list:
-                    closing = _close_list(active_list)
-                    if closing:
-                        converted_lines.append(closing)
-                converted_lines.append(_start_list(marker))
-                active_list = marker
+            markers, content = list_match.groups()
+            _sync_list_levels(converted_lines, list_stack, markers)
             converted_lines.append(f"[*]{_convert_inline_code(content.strip())}")
             continue
 
-        if active_list:
-            closing = _close_list(active_list)
-            if closing:
-                converted_lines.append(closing)
-            active_list = None
+        if list_stack and raw_line.strip():
+            converted_lines[-1] = "\n".join(
+                [converted_lines[-1], _convert_inline_code(raw_line.strip())]
+            )
+            continue
+
+        if list_stack and not raw_line.strip():
+            _close_list_stack(converted_lines, list_stack)
+            continue
 
         converted_lines.append(_convert_line(raw_line))
 
-    finalized = _finalize_result(converted_lines, active_list)
-    return "\n".join(filter(lambda line: line is not None, finalized))
+    _close_list_stack(converted_lines, list_stack)
+    return "\n".join(filter(lambda line: line is not None, converted_lines))
 
 
 __all__ = ["convert"]
